@@ -2,8 +2,6 @@ from enum import IntEnum
 import socket
 import struct
 
-import pygame
-
 
 # Protocol for commands is as documented in https://cls2sim.brunner-innovation.swiss/
 
@@ -50,7 +48,10 @@ class RudderTrim:
         self.sock.bind(('', 0))
         self.remoteEndpoint = ('127.0.0.1', 15090)
 
+        self.trim_increment = 0.05
+
         self.current_trim_pos = 0
+
 
     def get_rudder_pos(self):
         query_readpos = build_get_pos_query(AxisBitmask.Rudder)
@@ -58,10 +59,6 @@ class RudderTrim:
         print(f"pos_response length: {len(pos_response)}")
         length, status, node_yaw, pos_yaw = struct.unpack('<HBHf', pos_response[0:15])
         return pos_yaw
-
-    def release_trim(self):
-        self.current_trim_pos = 0
-        self.update_trim()
 
     def update_trim(self):
         query_set_trim_pos_yaw = build_set_trim_pos_query(self.current_trim_pos, AxisBitmask.Rudder)
@@ -71,76 +68,14 @@ class RudderTrim:
         self.current_trim_pos = self.get_rudder_pos()
         self.update_trim()
 
+    def release_trim(self):
+        self.current_trim_pos = 0
+        self.update_trim()
+
     def trim_left(self):
-        self.current_trim_pos -= 0.05
+        self.current_trim_pos -= self.trim_increment
         self.update_trim()
 
     def trim_right(self):
-        self.current_trim_pos += 0.05
+        self.current_trim_pos += self.trim_increment
         self.update_trim()
-
-
-class HotkeyHandler:
-    def __init__(self, hotkeys):
-        self.hotkeys = hotkeys
-        self.running = True
-        pygame.init()
-        pygame.joystick.init()
-        self.joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
-        self.previous_button_states = {joystick.get_id(): [False] * joystick.get_numbuttons() for joystick in
-                                       self.joysticks}
-        self.previous_hat_states = {joystick.get_id(): [[0, 0]] * joystick.get_numhats() for joystick in self.joysticks}
-
-        self.RudderTrim = RudderTrim()
-
-    def start(self):
-        while self.running:
-            pygame.event.pump()
-            for joystick in self.joysticks:
-                device_name = joystick.get_name()
-                device_id = joystick.get_id()
-
-                # Detect button presses
-                for i in range(joystick.get_numbuttons()):
-                    current_state = joystick.get_button(i)
-                    if current_state and not self.previous_button_states[device_id][i]:
-                        self.on_key_down(f"{device_name} Button {i}")
-                    elif not current_state and self.previous_button_states[device_id][i]:
-                        self.on_key_up(f"{device_name} Button {i}")
-                    self.previous_button_states[device_id][i] = current_state
-
-                # Detect POV (HAT) presses
-                hat_count = joystick.get_numhats()
-                for j in range(hat_count):
-                    current_hat_state = joystick.get_hat(j)
-                    if current_hat_state != self.previous_hat_states[device_id][j]:
-                        self.on_hat_change(f"{device_name} POV {j}", current_hat_state)
-                    self.previous_hat_states[device_id][j] = current_hat_state
-
-    def on_key_down(self, key):
-        for function, bound_key in self.hotkeys.items():
-            if key == bound_key:
-                print(f"Function {function} triggered on key down: {key}")
-                self.trigger_action(function)
-
-    def on_key_up(self, key):
-        for function, bound_key in self.hotkeys.items():
-            if key == bound_key:
-                print(f"Function {function} triggered on key up: {key}")
-
-    def on_hat_change(self, hat, state):
-        hat_key = f"{hat} {state}"
-        for function, bound_key in self.hotkeys.items():
-            if hat_key == bound_key:
-                print(f"Function {function} triggered on hat change: {hat_key}")
-                self.trigger_action(function)
-
-    def trigger_action(self, function):
-        if function == 'Trim Release':
-            self.RudderTrim.release_trim()
-        elif function == 'Trim Set':
-            self.RudderTrim.set_trim()
-        elif function == 'Trim Left':
-            self.RudderTrim.trim_left()
-        elif function == 'Trim Right':
-            self.RudderTrim.trim_right()
